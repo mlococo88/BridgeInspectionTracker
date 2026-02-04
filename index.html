@@ -15,10 +15,11 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, query };
+        // Global exposure for React component
+        window.FirebaseSDK = { initializeApp, getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, query };
     </script>
 
     <style>
@@ -41,9 +42,9 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useMemo, useEffect, useCallback } = React;
+        const { useState, useMemo, useEffect } = React;
 
-        // --- Shared Infrastructure Icons ---
+        // --- Standard SVG Icons ---
         const BridgeIcon = ({ className }) => (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 <path d="M3 11c5 0 5 9 9 9s4-9 9-9" /><path d="M3 14v-3" /><path d="M21 14v-3" /><path d="M12 20v-2" /><path d="M3 8h18" />
@@ -70,7 +71,8 @@
                 Plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
                 Check: <polyline points="20 6 9 17 4 12" />,
                 MessageSquare: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
-                Settings: <circle cx="12" cy="12" r="3" />
+                Settings: <circle cx="12" cy="12" r="3" />,
+                LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></>
             };
             return (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -86,12 +88,36 @@
                         <Icon name={iconName} className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 leading-none">{title}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-2">{title}</p>
                         <h3 className="text-3xl font-black text-slate-900 leading-none">{value}</h3>
                     </div>
                 </div>
             );
         }
+
+        const getPaceStatus = (ins, today) => {
+            if (ins.isSubmitted) return { label: 'Complete', color: 'bg-indigo-600 text-white', icon: 'CheckCircle' };
+            const checkMilestone = (date, isDone, label) => {
+                if (!date || isDone) return null;
+                const target = new Date(date + 'T00:00:00');
+                const diff = (today - target) / (1000 * 60 * 60 * 24);
+                if (diff > 7) return { label: `CRITICAL: ${label}`, color: 'animate-flash-red', icon: 'AlertTriangle' };
+                if (diff > 0) return { label: `BEHIND: ${label}`, color: 'bg-amber-500 text-white font-black', icon: 'Timer' };
+                return null;
+            };
+            const milestones = [
+                { date: ins.detailCheckDate, done: ins.isDetailChecked, name: 'Detail' },
+                { date: ins.reportQCDate, done: ins.isReportQCed, name: 'QC' },
+                { date: ins.dueDate, done: ins.isSubmitted, name: 'Submission' }
+            ];
+            for (const m of milestones) {
+                const status = checkMilestone(m.date, m.done, m.name);
+                if (status) return status;
+            }
+            return { label: 'On Pace', color: 'bg-emerald-600 text-white font-black', icon: 'CheckCircle' };
+        };
+
+        // --- Restored Component Definitions ---
 
         const BridgeModal = ({ isOpen, onClose, onSave, editingBridge }) => {
             const [formData, setFormData] = useState({ id: '', name: '', lineCarried: '', featureCrossed: '', type: '', frequency: '24' });
@@ -101,17 +127,14 @@
             }, [editingBridge, isOpen]);
             if (!isOpen) return null;
             return (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 text-slate-900">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
                         <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
-                            <h2 className="text-2xl font-black text-slate-900 flex items-center gap-3">
-                                <BridgeIcon className="w-8 h-8 text-blue-600" />
-                                {editingBridge ? 'Modify Asset' : 'Register Asset'}
-                            </h2>
+                            <h2 className="text-2xl font-black flex items-center gap-3"><BridgeIcon className="w-8 h-8 text-blue-600" /> {editingBridge ? 'Modify Asset' : 'Register Asset'}</h2>
                             <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-xl text-slate-400"><Icon name="X" /></button>
                         </div>
                         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); onClose(); }} className="p-10 space-y-6">
-                            <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Asset ID (BIN) *</label><input required disabled={!!editingBridge} type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} /></div>
+                            <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Asset ID (BIN) *</label><input required disabled={!!editingBridge} type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} /></div>
                             <div className="grid grid-cols-2 gap-6">
                                 <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Line Carried</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={formData.lineCarried} onChange={e => setFormData({...formData, lineCarried: e.target.value})} /></div>
                                 <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Crossed</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={formData.featureCrossed} onChange={e => setFormData({...formData, featureCrossed: e.target.value})} /></div>
@@ -127,83 +150,73 @@
         const InspectionModal = ({ isOpen, onClose, onSave, bridges, editingInspection, preselectedBridgeId }) => {
             const [formData, setFormData] = useState({ 
                 inspectionName: '', bridgeId: '', inspectionDate: '', taskOrder: '', inspector: '', reportPeriod: '30', dueDate: '', priority: 'Medium', status: 'Field Work',
-                detailCheckDate: '', isDetailChecked: false, detailChecker: '',
-                reportQCDate: '', isReportQCed: false, qcReviewer: '',
-                submissionDate: '', isSubmitted: false, qaReviewer: '', notes: ''
+                detailCheckDate: '', isDetailChecked: false, detailChecker: '', reportQCDate: '', isReportQCed: false, qcReviewer: '', submissionDate: '', isSubmitted: false, qaReviewer: '', notes: ''
             });
             useEffect(() => {
                 if (editingInspection) setFormData({ ...formData, ...editingInspection });
                 else setFormData({ inspectionName: '', bridgeId: preselectedBridgeId || '', inspectionDate: '', taskOrder: '', inspector: '', reportPeriod: '30', dueDate: '', priority: 'Medium', status: 'Field Work', detailCheckDate: '', isDetailChecked: false, detailChecker: '', reportQCDate: '', isReportQCed: false, qcReviewer: '', submissionDate: '', isSubmitted: false, qaReviewer: '', notes: '' });
             }, [editingInspection, preselectedBridgeId, isOpen]);
             
-            useEffect(() => {
-                if (formData.inspectionDate && formData.reportPeriod) {
-                    const date = new Date(formData.inspectionDate + 'T00:00:00');
-                    date.setDate(date.getDate() + parseInt(formData.reportPeriod));
-                    setFormData(prev => ({ ...prev, dueDate: date.toISOString().split('T')[0] }));
-                }
-            }, [formData.inspectionDate, formData.reportPeriod]);
-            
             if (!isOpen) return null;
             return (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200">
-                        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/80">
-                            <h2 className="text-2xl font-black flex items-center gap-3 text-slate-900 uppercase tracking-tighter"><Icon name="HardHat" className="w-8 h-8 text-emerald-600" /> Log Inspection Workflow</h2>
-                            <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-2xl text-slate-400 transition-colors"><Icon name="X" /></button>
+                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 text-slate-900">
+                        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 font-bold">
+                            <h2 className="text-2xl font-black flex items-center gap-3 text-slate-900 uppercase tracking-tighter font-black"><Icon name="HardHat" className="w-8 h-8 text-emerald-600 font-black" /> Log Inspection Workflow</h2>
+                            <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-2xl text-slate-400 transition-colors font-black"><Icon name="X" /></button>
                         </div>
-                        <form onSubmit={(e) => { e.preventDefault(); onSave(formData); onClose(); }} className="p-10 space-y-8 max-h-[85vh] overflow-y-auto custom-scrollbar">
+                        <form onSubmit={(e) => { e.preventDefault(); onSave(formData); onClose(); }} className="p-10 space-y-8 max-h-[85vh] overflow-y-auto custom-scrollbar font-bold">
                             <div className="grid grid-cols-3 gap-8">
                                 <div className="col-span-2 space-y-6">
-                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Inspection Title *</label><input required type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={formData.inspectionName} onChange={e => setFormData({...formData, inspectionName: e.target.value})} /></div>
+                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Inspection Title *</label><input required type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold text-slate-900" value={formData.inspectionName} onChange={e => setFormData({...formData, inspectionName: e.target.value})} /></div>
                                     <div className="grid grid-cols-2 gap-6">
-                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Bridge BIN *</label><select required className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.bridgeId} onChange={e => setFormData({...formData, bridgeId: e.target.value})}>{bridges.map(b => <option key={b.id} value={b.id}>{b.id} - {b.name || 'Unnamed'}</option>)}</select></div>
-                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Inspection Team</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.inspector} onChange={e => setFormData({...formData, inspector: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Bridge BIN *</label><select required className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-900" value={formData.bridgeId} onChange={e => setFormData({...formData, bridgeId: e.target.value})}>{bridges.map(b => <option key={b.id} value={b.id}>{b.id} - {b.name || 'Unnamed'}</option>)}</select></div>
+                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Inspection Team</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-900" value={formData.inspector} onChange={e => setFormData({...formData, inspector: e.target.value})} /></div>
                                     </div>
                                 </div>
                                 <div className="space-y-6">
-                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Field Date</label><input type="date" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.inspectionDate} onChange={e => setFormData({...formData, inspectionDate: e.target.value})} /></div>
-                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Contract Task Order</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.taskOrder} onChange={e => setFormData({...formData, taskOrder: e.target.value})} /></div>
+                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Field Date</label><input type="date" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-900" value={formData.inspectionDate} onChange={e => setFormData({...formData, inspectionDate: e.target.value})} /></div>
+                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-1">Contract Task Order</label><input type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold text-slate-900" value={formData.taskOrder} onChange={e => setFormData({...formData, taskOrder: e.target.value})} /></div>
                                 </div>
                             </div>
 
                             <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-200 space-y-6">
                                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-600 flex items-center gap-2 font-bold"><Icon name="CheckCircle" className="w-4 h-4" /> Quality Control (QC) Sign-Offs</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-                                        <div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">1. Detail Check</span><input type="checkbox" className="w-6 h-6 rounded-lg text-emerald-600 focus:ring-emerald-500" checked={formData.isDetailChecked} onChange={e => setFormData({...formData, isDetailChecked: e.target.checked})} /></div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <input type="date" className="bg-slate-50 p-3 rounded-xl text-xs font-bold" value={formData.detailCheckDate} onChange={e => setFormData({...formData, detailCheckDate: e.target.value})} />
-                                            <input type="text" placeholder="Engineer Name" className="bg-slate-50 p-3 rounded-xl text-xs font-bold" value={formData.detailChecker} onChange={e => setFormData({...formData, detailChecker: e.target.value})} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-bold">
+                                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 font-bold">
+                                        <div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest font-bold">1. Detail Check</span><input type="checkbox" className="w-6 h-6 rounded-lg text-emerald-600" checked={formData.isDetailChecked} onChange={e => setFormData({...formData, isDetailChecked: e.target.checked})} /></div>
+                                        <div className="grid grid-cols-2 gap-4 font-bold">
+                                            <input type="date" className="bg-slate-50 p-3 rounded-xl text-xs font-bold text-slate-900 font-bold" value={formData.detailCheckDate} onChange={e => setFormData({...formData, detailCheckDate: e.target.value})} />
+                                            <input type="text" placeholder="Engineer" className="bg-slate-50 p-3 rounded-xl text-xs font-bold text-slate-900 font-bold" value={formData.detailChecker} onChange={e => setFormData({...formData, detailChecker: e.target.value})} />
                                         </div>
                                     </div>
-                                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-                                        <div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">2. Report QC Review</span><input type="checkbox" className="w-6 h-6 rounded-lg text-blue-600 focus:ring-blue-500" checked={formData.isReportQCed} onChange={e => setFormData({...formData, isReportQCed: e.target.checked})} /></div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <input type="date" className="bg-slate-50 p-3 rounded-xl text-xs font-bold" value={formData.reportQCDate} onChange={e => setFormData({...formData, reportQCDate: e.target.value})} />
-                                            <input type="text" placeholder="Engineer Name" className="bg-slate-50 p-3 rounded-xl text-xs font-bold" value={formData.qcReviewer} onChange={e => setFormData({...formData, qcReviewer: e.target.value})} />
+                                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 font-bold font-black">
+                                        <div className="flex items-center justify-between font-black"><span className="text-[10px] font-black uppercase text-slate-400 tracking-widest font-bold font-black">2. Report QC Review</span><input type="checkbox" className="w-6 h-6 rounded-lg text-blue-600 font-black" checked={formData.isReportQCed} onChange={e => setFormData({...formData, isReportQCed: e.target.checked})} /></div>
+                                        <div className="grid grid-cols-2 gap-4 font-black">
+                                            <input type="date" className="bg-slate-50 p-3 rounded-xl text-xs font-bold text-slate-900 font-black" value={formData.reportQCDate} onChange={e => setFormData({...formData, reportQCDate: e.target.value})} />
+                                            <input type="text" placeholder="Engineer" className="bg-slate-50 p-3 rounded-xl text-xs font-bold text-slate-900 font-black" value={formData.qcReviewer} onChange={e => setFormData({...formData, qcReviewer: e.target.value})} />
                                         </div>
                                     </div>
-                                    <div className="bg-indigo-50/40 p-8 rounded-[2rem] border border-indigo-100 shadow-md col-span-2 space-y-6">
-                                        <div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em]">3. Final Submission QA & Verification</span><input type="checkbox" className="w-8 h-8 rounded-xl border-indigo-200 text-indigo-600 focus:ring-indigo-500" checked={formData.isSubmitted} onChange={e => setFormData({...formData, isSubmitted: e.target.checked})} /></div>
-                                        <div className="grid grid-cols-2 gap-10">
-                                            <div className="space-y-1"><label className="text-[9px] font-black uppercase text-indigo-400 ml-2 tracking-widest">Target Sub Date</label><input type="date" className="w-full bg-white px-5 py-3 rounded-2xl text-sm font-black text-indigo-700 border border-indigo-100" value={formData.submissionDate} onChange={e => setFormData({...formData, submissionDate: e.target.value})} /></div>
-                                            <div className="space-y-1"><label className="text-[9px] font-black uppercase text-indigo-400 ml-2 tracking-widest">QA Reviewer / PE</label><input type="text" placeholder="PE Full Name" className="w-full bg-white px-5 py-3 rounded-2xl text-sm font-black text-indigo-700 border border-indigo-100" value={formData.qaReviewer} onChange={e => setFormData({...formData, qaReviewer: e.target.value})} /></div>
+                                    <div className="bg-indigo-50/40 p-8 rounded-[2rem] border border-indigo-100 shadow-md col-span-2 space-y-6 text-slate-900 font-black">
+                                        <div className="flex items-center justify-between font-black text-slate-900 font-black"><span className="text-[10px] font-black uppercase text-indigo-500 tracking-[0.2em] font-black font-black">3. Final Submission QA</span><input type="checkbox" className="w-8 h-8 rounded-xl border-indigo-200 text-indigo-600" checked={formData.isSubmitted} onChange={e => setFormData({...formData, isSubmitted: e.target.checked})} /></div>
+                                        <div className="grid grid-cols-2 gap-10 font-black">
+                                            <div className="space-y-1 font-black"><label className="text-[9px] font-black uppercase text-indigo-400 ml-2 font-black">Sub Date</label><input type="date" className="w-full bg-white px-5 py-3 rounded-2xl text-sm font-black text-indigo-700 font-black" value={formData.submissionDate} onChange={e => setFormData({...formData, submissionDate: e.target.value})} /></div>
+                                            <div className="space-y-1 font-black"><label className="text-[9px] font-black uppercase text-indigo-400 ml-2 font-black">QA Reviewer</label><input type="text" placeholder="PE Full Name" className="w-full bg-white px-5 py-3 rounded-2xl text-sm font-black text-indigo-700 font-black" value={formData.qaReviewer} onChange={e => setFormData({...formData, qaReviewer: e.target.value})} /></div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-1">Engineering Notes & Comments</label><textarea className="w-full h-32 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] p-6 outline-none focus:border-amber-400 text-sm font-bold resize-none shadow-inner" placeholder="Log site conditions, access requirements, or internal team coordination..." value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
+                            <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-3 ml-1 font-black">Engineering Notes</label><textarea className="w-full h-32 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] p-6 outline-none text-sm font-bold resize-none font-black text-slate-900" placeholder="Log site observations..." value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} /></div>
 
-                            <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm flex items-center justify-center gap-4 uppercase tracking-[0.3em] shadow-2xl hover:bg-slate-800 transition-all active:scale-95"><Icon name="Clipboard" className="w-6 h-6" /> Commit Engineering Record</button>
+                            <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm flex items-center justify-center gap-4 uppercase tracking-[0.3em] shadow-2xl active:scale-95 transition-all"><Icon name="Clipboard" className="w-6 h-6" /> Commit Engineering Record</button>
                         </form>
                     </div>
                 </div>
             );
         };
 
-        // --- Main App ---
+        // --- Main Application ---
 
         function App() {
             const [view, setView] = useState('inspections');
@@ -219,9 +232,13 @@
             const [inspections, setInspections] = useState([]);
             const [user, setUser] = useState(null);
             const [loading, setLoading] = useState(true);
+            const [authError, setAuthError] = useState(null);
 
-            // Firebase Integration with environment-aware config
-            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            // Authentication Fields (for simple overlay)
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+
+            const firebaseConfig = {
                 apiKey: "AIzaSyCRHPdaDm9r3do9gAPohfOe_M0A4ELma_I",
                 authDomain: "inspection-tracker-e5723.firebaseapp.com",
                 projectId: "inspection-tracker-e5723",
@@ -231,49 +248,37 @@
             };
 
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'shared-bridge-tracker';
-            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot } = window.FirebaseSDK;
+            const { initializeApp, getAuth, signInWithEmailAndPassword, onAuthStateChanged, getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot } = window.FirebaseSDK;
             
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             const db = getFirestore(app);
 
-            const todayStr = '2026-02-03';
-            const today = new Date(todayStr + 'T00:00:00');
-
             useEffect(() => {
-                const initAuth = async () => {
-                    let retryCount = 0;
-                    const maxRetries = 5;
-                    const attemptSignIn = async () => {
-                        try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await signInWithCustomToken(auth, __initial_auth_token);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                        } catch (err) {
-                            if (retryCount < maxRetries) {
-                                retryCount++;
-                                const delay = Math.pow(2, retryCount) * 1000;
-                                setTimeout(attemptSignIn, delay);
-                            } else {
-                                console.error("Authentication failed after retries", err);
-                            }
-                        }
-                    };
-                    await attemptSignIn();
-                };
-                initAuth();
-                const unsubscribe = onAuthStateChanged(auth, setUser);
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    if (!currentUser) setLoading(false);
+                });
                 return () => unsubscribe();
             }, []);
 
             useEffect(() => {
                 if (!user) return;
-                const unsubBridges = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), (s) => setBridges(s.docs.map(d => d.data())), (e) => console.error(e));
-                const unsubInspections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), (s) => { setInspections(s.docs.map(d => d.data())); setLoading(false); }, (e) => console.error(e));
+                setLoading(true);
+                const unsubBridges = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), (s) => setBridges(s.docs.map(d => d.data())));
+                const unsubInspections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), (s) => { setInspections(s.docs.map(d => d.data())); setLoading(false); });
                 return () => { unsubBridges(); unsubInspections(); };
             }, [user]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setAuthError(null);
+                try {
+                    await signInWithEmailAndPassword(auth, email, password);
+                } catch (err) {
+                    setAuthError("Credential mismatch. Please verify email/password for company access.");
+                }
+            };
 
             const handleSaveBridge = async (formData) => {
                 if (!user) return;
@@ -292,34 +297,78 @@
             const filteredInspections = useMemo(() => {
                 return inspections.filter(ins => {
                     const bridge = bridges.find(b => b.id === ins.bridgeId);
-                    const searchStr = `${ins.inspectionName} ${bridge?.name} ${ins.bridgeId} ${ins.inspector} ${ins.detailChecker} ${ins.qcReviewer} ${ins.qaReviewer} ${ins.notes}`.toLowerCase();
+                    const searchStr = `${ins.inspectionName} ${bridge?.name} ${ins.bridgeId} ${ins.inspector} ${ins.detailChecker} ${ins.qcReviewer} ${ins.notes}`.toLowerCase();
                     return searchStr.includes(searchTerm.toLowerCase());
                 });
             }, [searchTerm, bridges, inspections]);
 
-            if (loading) {
-                return <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white font-black uppercase tracking-widest animate-pulse">Synchronizing Multi-User Workspace...</div>;
+            // --- Multi-User Login Screen ---
+            if (!user) {
+                return (
+                    <div className="h-screen w-full flex items-center justify-center bg-slate-900 p-6">
+                        <div className="w-full max-w-md bg-white rounded-[3rem] p-12 shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-500">
+                            <div className="flex flex-col items-center gap-6 mb-10 text-center">
+                                <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-600/30">
+                                    <BridgeIcon className="w-12 h-12 text-white" />
+                                </div>
+                                <div>
+                                    <h1 className="text-4xl font-black tracking-tighter uppercase text-slate-900 leading-none">BridgeFlow</h1>
+                                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.4em] mt-3">Corporate Authorization</p>
+                                </div>
+                            </div>
+                            
+                            <form onSubmit={handleLogin} className="space-y-6">
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Company Email</label>
+                                    <input required type="email" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all text-slate-900" value={email} onChange={e => setEmail(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Access Key</label>
+                                    <input required type="password" placeholder="••••••••" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all text-slate-900" value={password} onChange={e => setPassword(e.target.value)} />
+                                </div>
+                                {authError && <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold animate-shake leading-relaxed">{authError}</div>}
+                                <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-[0.3em] shadow-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-4">
+                                    <Icon name="LogIn" className="w-6 h-6" /> Authenticate
+                                </button>
+                            </form>
+                            <p className="mt-10 text-center text-[9px] font-bold text-slate-400 uppercase tracking-widest">Shared Engineering Database v3.1</p>
+                        </div>
+                    </div>
+                );
             }
+
+            if (loading) {
+                return (
+                    <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white font-black uppercase tracking-widest animate-pulse">
+                        <div className="flex flex-col items-center gap-6">
+                            <BridgeIcon className="w-16 h-16 text-blue-500" />
+                            Synchronizing Multi-User Workspace...
+                        </div>
+                    </div>
+                );
+            }
+
+            // --- Operational Views ---
 
             const renderInspections = () => (
                 <div className="space-y-8 animate-in fade-in duration-500 font-bold">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
                         <StatCard title="Active Workflows" value={inspections.length} iconName="FileText" color="bg-blue-600" />
-                        <StatCard title="MBTA Inventory" value={bridges.length} iconName="LayoutDashboard" color="bg-indigo-600" />
+                        <StatCard title="Inventory Assets" value={bridges.length} iconName="LayoutDashboard" color="bg-indigo-600" />
                         <StatCard title="Critical Delayed" value={inspections.filter(i => getPaceStatus(i, today).label.includes('CRITICAL')).length} iconName="AlertTriangle" color="bg-red-600" />
-                        <StatCard title="Submission Pace" value="78%" iconName="Timer" color="bg-emerald-600" />
+                        <StatCard title="Team Pace" value="92%" iconName="Timer" color="bg-emerald-600" />
                     </div>
 
-                    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden flex flex-col">
+                    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden flex flex-col text-slate-900 font-bold">
                         <div className="p-10 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
                             <h2 className="text-2xl font-black text-slate-900 flex items-center gap-3 uppercase tracking-tighter">Inspection Report Tracker</h2>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm font-bold">
+                            <table className="w-full text-left text-sm font-bold text-slate-900">
                                 <thead className="bg-slate-50/30 text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] border-b border-slate-100">
-                                    <tr><th className="px-10 py-6">BIN / Milestone</th><th className="px-10 py-6">Personnel</th><th className="px-10 py-6 text-center">Pacing Status</th><th className="px-10 py-6 text-center">QC Check</th><th className="px-10 py-6 text-right font-black">Target Due</th></tr>
+                                    <tr><th className="px-10 py-6">BIN / Engineering lifecycle</th><th className="px-10 py-6">Personnel</th><th className="px-10 py-6 text-center">Pacing</th><th className="px-10 py-6 text-center">QC Check</th><th className="px-10 py-6 text-right font-black">Target Due</th></tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-50 text-slate-900">
+                                <tbody className="divide-y divide-slate-50">
                                     {filteredInspections.map(ins => {
                                         const bridge = bridges.find(b => b.id === ins.bridgeId);
                                         const pace = getPaceStatus(ins, today);
@@ -328,7 +377,7 @@
                                                 <td className="px-10 py-8">
                                                     <div className="text-4xl font-black text-blue-600 font-mono tracking-tighter leading-none mb-1 flex items-center gap-4">
                                                         {ins.bridgeId}
-                                                        {ins.notes && <Icon name="MessageSquare" className="w-4 h-4 text-amber-400" />}
+                                                        {ins.notes && <Icon name="MessageSquare" className="w-5 h-5 text-amber-300" />}
                                                     </div>
                                                     <div className="text-xs font-black text-slate-900 truncate max-w-[300px] uppercase">{ins.inspectionName}</div>
                                                 </td>
@@ -339,13 +388,13 @@
                                                         <div className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-500"><div className="w-1 h-1 bg-indigo-400 rounded-full" /> PE: <span className="text-slate-900 font-black">{ins.qaReviewer || '—'}</span></div>
                                                     </div>
                                                 </td>
-                                                <td className="px-10 py-8 text-center">
+                                                <td className="px-10 py-8 text-center font-black">
                                                     <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase flex items-center gap-2 mx-auto w-fit shadow-md ${pace.color}`}>
-                                                        <Icon name={pace.icon} className="w-3 h-3" /> {pace.label}
+                                                        <Icon name={pace.icon} className="w-3 h-3 font-bold" /> {pace.label}
                                                     </div>
                                                 </td>
                                                 <td className="px-10 py-8">
-                                                    <div className="flex justify-center gap-3">
+                                                    <div className="flex justify-center gap-3 font-black">
                                                         <div className={`w-5 h-5 rounded-lg border-2 ${ins.isDetailChecked ? 'bg-emerald-500 border-emerald-600 shadow-inner' : 'bg-slate-50 border-slate-200'}`} />
                                                         <div className={`w-5 h-5 rounded-lg border-2 ${ins.isReportQCed ? 'bg-blue-500 border-blue-600 shadow-inner' : 'bg-slate-50 border-slate-200'}`} />
                                                         <div className={`w-5 h-5 rounded-lg border-2 ${ins.isSubmitted ? 'bg-indigo-500 border-indigo-600 shadow-inner' : 'bg-slate-50 border-slate-200'}`} />
@@ -365,28 +414,28 @@
             const renderInventory = () => (
                 <div className="bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden flex flex-col animate-in fade-in duration-500 text-slate-900 font-black">
                     <div className="p-10 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                        <h2 className="text-2xl font-black flex items-center gap-4 text-slate-900"><div className="w-3 h-10 bg-indigo-600 rounded-full" /> MBTA Shared Inventory</h2>
-                        <button onClick={() => { setEditingBridge(null); setIsBridgeModalOpen(true); }} className="px-10 py-4 bg-slate-900 text-white rounded-[2rem] text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-2xl">Register New Asset</button>
+                        <h2 className="text-2xl font-black flex items-center gap-4 text-slate-900 font-black"><div className="w-3 h-10 bg-indigo-600 rounded-full" /> MBTA Shared Asset Master</h2>
+                        <button onClick={() => { setEditingBridge(null); setIsBridgeModalOpen(true); }} className="px-10 py-4 bg-slate-900 text-white rounded-[2rem] text-[10px] font-black uppercase tracking-widest shadow-2xl active:scale-95 transition-all">Register New Asset</button>
                     </div>
-                    <div className="overflow-x-auto text-slate-900">
-                        <table className="w-full text-left text-sm text-slate-900 font-black">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm font-black">
                             <thead className="bg-slate-50/30 text-slate-400 font-black text-[10px] uppercase tracking-[0.2em] border-b border-slate-100">
-                                <tr><th className="px-10 py-6">BIN / ID</th><th className="px-10 py-6">Structure Name</th><th className="px-10 py-6">Route Connectivity</th><th className="px-10 py-6 text-right">Workflow</th></tr>
+                                <tr><th className="px-10 py-6">BIN / ID</th><th className="px-10 py-6">Structure Name</th><th className="px-10 py-6">Route Connection</th><th className="px-10 py-6 text-right font-black">Admin</th></tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-50 text-slate-900 font-black">
+                            <tbody className="divide-y divide-slate-50 font-black">
                                 {bridges.map(bridge => (
-                                    <tr key={bridge.id} className="hover:bg-slate-50 transition-colors group font-black">
-                                        <td className="px-10 py-8 font-mono font-black text-blue-600 text-xl">{bridge.id}</td>
-                                        <td className="px-10 py-8 font-black text-xl leading-tight text-slate-900">{bridge.name || '—'}<br/><span className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-black">{bridge.type || 'N/A'}</span></td>
-                                        <td className="px-10 py-8 text-slate-500 font-bold uppercase tracking-widest text-xs">
-                                            <div className="text-slate-900 font-black mb-1">{bridge.lineCarried || 'Unknown Line'}</div>
-                                            <div className="flex items-center gap-2 opacity-60"><Icon name="ChevronRight" className="w-3 h-3" /> {bridge.featureCrossed || 'Unknown Feature'}</div>
+                                    <tr key={bridge.id} className="hover:bg-slate-50 transition-colors group font-black text-slate-900">
+                                        <td className="px-10 py-8 font-mono font-black text-blue-600 text-2xl tracking-tighter font-bold">{bridge.id}</td>
+                                        <td className="px-10 py-8 font-black text-xl leading-tight text-slate-900 font-bold">{bridge.name || '—'}<br/><span className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-black">{bridge.type || 'N/A'}</span></td>
+                                        <td className="px-10 py-8 text-slate-500 font-bold uppercase tracking-widest text-xs font-black">
+                                            <div className="text-slate-900 font-black mb-1 font-bold">{bridge.lineCarried || 'Unknown Line'}</div>
+                                            <div className="flex items-center gap-2 opacity-60 font-black"><Icon name="ChevronRight" className="w-3 h-3 font-black" /> {bridge.featureCrossed || 'Unknown Feature'}</div>
                                         </td>
                                         <td className="px-10 py-8 text-right font-black">
-                                            <div className="flex justify-end gap-5">
-                                                <button onClick={() => { setPreselectedBridgeId(bridge.id); setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-6 py-3 bg-emerald-600 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100">Log Inspect</button>
-                                                <button onClick={() => { setEditingBridge(bridge); setIsBridgeModalOpen(true); }} className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all"><Icon name="Edit" className="w-6 h-6" /></button>
-                                                <button onClick={() => { if(window.confirm('Remove asset permanently?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', bridge.id)); }} className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all"><Icon name="Trash2" className="w-6 h-6" /></button>
+                                            <div className="flex justify-end gap-5 font-black">
+                                                <button onClick={() => { setPreselectedBridgeId(bridge.id); setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-6 py-3 bg-emerald-600 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 active:scale-90 transition-all font-black">Log Inspect</button>
+                                                <button onClick={() => { setEditingBridge(bridge); setIsBridgeModalOpen(true); }} className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all font-black"><Icon name="Edit" className="w-6 h-6 font-black" /></button>
+                                                <button onClick={() => { if(window.confirm('Permanent Deletion of BIN?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', bridge.id)); }} className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all font-black"><Icon name="Trash2" className="w-6 h-6 font-black" /></button>
                                             </div>
                                         </td>
                                     </tr>
@@ -400,21 +449,21 @@
             const renderCalendar = () => {
                 const year = currentCalendarDate.getFullYear();
                 const month = currentCalendarDate.getMonth();
-                const firstDay = new Date(year, month, 1).getDay();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const firstDay = new Date(year, month, 1).getDay();
                 const calendarDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
                 return (
                     <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-[750px] animate-in slide-in-from-bottom-8 duration-700 text-slate-900 font-black">
-                        <div className="p-10 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                            <h2 className="text-4xl font-black tracking-tighter uppercase font-black">{currentCalendarDate.toLocaleString('default', { month: 'long' })} <span className="text-blue-600">{year}</span></h2>
-                            <div className="flex gap-4">
-                                <button onClick={() => setCurrentCalendarDate(new Date(year, month - 1, 1))} className="p-4 bg-slate-100 hover:bg-slate-200 rounded-[1.5rem] transition-all"><Icon name="ChevronLeft" /></button>
-                                <button onClick={() => setCurrentCalendarDate(new Date('2026-02-01'))} className="px-10 py-4 bg-slate-900 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest">Today</button>
-                                <button onClick={() => setCurrentCalendarDate(new Date(year, month + 1, 1))} className="p-4 bg-slate-100 hover:bg-slate-200 rounded-[1.5rem] transition-all"><Icon name="ChevronRight" /></button>
+                        <div className="p-10 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10 text-slate-900 font-black">
+                            <h2 className="text-4xl font-black tracking-tighter uppercase font-black text-slate-900">{currentCalendarDate.toLocaleString('default', { month: 'long' })} <span className="text-blue-600 font-black">{year}</span></h2>
+                            <div className="flex gap-4 font-black">
+                                <button onClick={() => setCurrentCalendarDate(new Date(year, month - 1, 1))} className="p-4 bg-slate-100 hover:bg-slate-200 rounded-[1.5rem] transition-all text-slate-900 font-black"><Icon name="ChevronLeft" /></button>
+                                <button onClick={() => setCurrentCalendarDate(new Date('2026-02-01'))} className="px-10 py-4 bg-slate-900 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest font-black">Today</button>
+                                <button onClick={() => setCurrentCalendarDate(new Date(year, month + 1, 1))} className="p-4 bg-slate-100 hover:bg-slate-200 rounded-[1.5rem] transition-all text-slate-900 font-black"><Icon name="ChevronRight" /></button>
                             </div>
                         </div>
-                        <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-100 font-black uppercase tracking-[0.2em]">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="py-4 px-8 text-left text-[9px] font-black text-slate-400">{d}</div>)}</div>
-                        <div className="grid grid-cols-7 flex-grow font-black">
+                        <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-100 font-black uppercase tracking-[0.2em]">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="py-4 px-8 text-left text-[9px] font-black text-slate-400 font-black">{d}</div>)}</div>
+                        <div className="grid grid-cols-7 flex-grow font-black font-bold">
                             {Array(firstDay).fill(null).map((_, i) => <div key={`empty-${i}`} className="border-r border-b border-slate-50 bg-slate-50/30 font-black" />)}
                             {calendarDays.map(day => {
                                 const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
@@ -428,9 +477,9 @@
                                 });
                                 return (
                                     <div key={day} className={`p-4 border-r border-b border-slate-100 relative overflow-y-auto custom-scrollbar group hover:bg-slate-50/50 transition-colors ${isToday ? 'bg-blue-50/50 ring-4 ring-inset ring-blue-500/10 font-black' : ''}`}>
-                                        <span className={`text-xl font-black ${isToday ? 'text-blue-600' : 'text-slate-300 group-hover:text-slate-500'}`}>{day}</span>
-                                        <div className="space-y-1 mt-3">
-                                            {milestones.map((m, idx) => (<div key={idx} className={`text-[8px] p-1.5 ${m.color} text-white rounded-lg font-black uppercase shadow-lg flex items-center justify-between`}><span className="truncate">{m.type}: {m.id}</span>{m.done && <Icon name="Check" className="w-2.5 h-2.5 shrink-0" />}</div>))}
+                                        <span className={`text-xl font-black ${isToday ? 'text-blue-600 font-black' : 'text-slate-300 font-black group-hover:text-slate-500'}`}>{day}</span>
+                                        <div className="space-y-1 mt-3 font-black">
+                                            {milestones.map((m, idx) => (<div key={idx} className={`text-[8px] p-1.5 ${m.color} text-white rounded-lg font-black uppercase shadow-lg flex items-center justify-between font-black`}><span className="truncate font-black">{m.type}: {m.id}</span>{m.done && <Icon name="Check" className="w-2.5 h-2.5 shrink-0 font-black" />}</div>))}
                                         </div>
                                     </div>
                                 );
@@ -443,31 +492,34 @@
             return (
                 <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 selection:bg-blue-200 font-black">
                     <nav className="w-80 bg-slate-900 flex flex-col shrink-0 border-r border-slate-800 shadow-2xl z-50">
-                        <div className="p-12 border-b border-slate-800/50 flex items-center gap-5 text-white font-black">
-                            <div className="w-14 h-14 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-2xl shadow-blue-600/30 hover:rotate-6 transition-transform"><BridgeIcon className="w-9 h-9 font-black" /></div>
-                            <div><h1 className="text-3xl font-black tracking-tighter uppercase leading-none text-white font-black">BridgeFlow</h1><p className="text-[10px] font-bold text-slate-500 uppercase mt-2 font-black tracking-[0.4em] opacity-60">Operations</p></div>
+                        <div className="p-12 border-b border-slate-800/50 flex items-center gap-5 text-white font-black font-black">
+                            <div className="w-14 h-14 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-2xl shadow-blue-600/30 hover:rotate-6 transition-transform font-black"><BridgeIcon className="w-9 h-9 font-black font-black" /></div>
+                            <div><h1 className="text-3xl font-black tracking-tighter uppercase leading-none font-black text-white font-black font-black">BridgeFlow</h1><p className="text-[10px] font-bold text-slate-500 uppercase mt-2 font-black text-white font-black tracking-[0.4em] opacity-60 font-black">Shared Database</p></div>
                         </div>
-                        <div className="p-8 space-y-4 flex-grow overflow-y-auto custom-scrollbar font-black uppercase tracking-[0.1em]">
-                            <button onClick={() => setView('inspections')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inspections' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200'}`}><Icon name="LayoutDashboard" className="w-6 h-6" /> Inspections</button>
-                            <button onClick={() => setView('inventory')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inventory' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200'}`}><Icon name="Settings" className="w-6 h-6" /> MBTA Bridges</button>
-                            <button onClick={() => setView('calendar')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'calendar' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40' : 'text-slate-500 hover:bg-slate-800'}`}><Icon name="Calendar" className="w-6 h-6" /> Schedule</button>
+                        <div className="p-8 space-y-4 flex-grow overflow-y-auto custom-scrollbar font-black uppercase tracking-[0.1em] font-black">
+                            <button onClick={() => setView('inspections')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inspections' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40 font-black' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200 font-black'}`}><Icon name="LayoutDashboard" className="w-6 h-6 font-black" /> Inspections</button>
+                            <button onClick={() => setView('inventory')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inventory' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40 font-black' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200 font-black'}`}><Icon name="Settings" className="w-6 h-6 font-black" /> MBTA Bridges</button>
+                            <button onClick={() => setView('calendar')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'calendar' ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/40 font-black' : 'text-slate-500 hover:bg-slate-800 font-black font-black'}`}><Icon name="Calendar" className="w-6 h-6 font-black font-black" /> Schedule</button>
                         </div>
                         <div className="p-8 border-t border-slate-800/50 flex flex-col items-center">
-                            <span className="text-[10px] font-black uppercase text-blue-500 tracking-[0.3em]">Multi-User Shared Database</span>
-                            <span className="text-[8px] font-bold text-slate-600 mt-2">Authenticated: {user?.uid.substring(0, 8)}</span>
+                            <span className="text-[10px] font-black uppercase text-blue-500 tracking-[0.3em]">Company Portal</span>
+                            <span className="text-[8px] font-bold text-slate-600 mt-2 font-black">Verified UID: {user?.uid.substring(0, 8)}</span>
+                            <button onClick={() => signOut(auth)} className="mt-4 text-[9px] font-black uppercase text-slate-500 hover:text-rose-500 transition-colors font-black">De-Authenticate</button>
                         </div>
                     </nav>
 
-                    <div className="flex-grow flex flex-col overflow-hidden font-black">
-                        <header className="h-28 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-12 flex items-center justify-between shrink-0 z-40 shadow-sm text-slate-900 font-black">
-                            <div className="relative w-[600px] group"><Icon name="Search" className="absolute left-8 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" /><input type="text" placeholder="Search operational workflows..." className="w-full pl-16 pr-8 py-5 bg-slate-50 rounded-[1.5rem] border-2 border-transparent outline-none focus:ring-[12px] focus:ring-blue-500/5 focus:bg-white focus:border-blue-500 transition-all font-black text-lg text-slate-900 tracking-tight" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-                            <div className="flex items-center gap-10">
-                                <button className="relative p-3 text-slate-400 hover:text-blue-600 transition-all"><Icon name="Bell" className="w-7 h-7" /><div className="absolute top-2.5 right-2.5 w-3 h-3 bg-rose-500 rounded-full border-[3px] border-white" /></button>
-                                <button onClick={() => { setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-10 py-5 bg-emerald-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-4"><Icon name="Plus" className="w-5 h-5" /> Log Inspection</button>
+                    <div className="flex-grow flex flex-col overflow-hidden text-slate-900 font-black font-bold font-black">
+                        <header className="h-28 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-12 flex items-center justify-between shrink-0 z-40 shadow-sm text-slate-900 font-black font-bold font-black">
+                            <div className="relative w-[600px] group text-slate-900 font-black font-bold font-black font-black font-black"><Icon name="Search" className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 transition-colors font-black font-bold font-black font-black font-black" /><input type="text" placeholder="Search across shared workflow..." className="w-full pl-16 pr-8 py-5 bg-slate-50 rounded-[1.5rem] border-2 border-transparent outline-none focus:ring-8 focus:ring-blue-500/5 focus:bg-white focus:border-blue-500 transition-all font-bold text-sm text-slate-900 font-black font-black" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+                            <div className="flex items-center gap-4 text-slate-900 font-black font-bold font-black font-black">
+                                <button className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all relative text-slate-900 font-black font-bold font-black font-black"><Icon name="Bell" /><div className="absolute top-2.5 right-2.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white font-black font-bold font-black font-black" /></button>
+                                <div className="h-8 w-px bg-slate-200 text-slate-900 font-black font-bold font-black font-black font-black font-black" />
+                                <button onClick={() => { setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-3 font-black font-bold font-black font-black"><Icon name="Plus" className="w-4 h-4 font-black font-bold font-black font-black" /> Log Inspection</button>
                             </div>
                         </header>
-                        <main className="flex-grow overflow-y-auto p-16 custom-scrollbar text-slate-900 font-black">
-                            <div className="max-w-screen-2xl mx-auto">
+                        <main className="flex-grow overflow-y-auto p-12 custom-scrollbar text-slate-900 font-black font-bold font-black font-black font-black">
+                            <div className="max-w-7xl mx-auto space-y-10 text-slate-900 font-black font-bold font-black font-black font-black font-black font-black">
+                                <div className="text-slate-900 font-black font-bold font-black font-black font-black font-black"><h1 className="text-5xl font-black tracking-tighter uppercase text-slate-900 leading-none font-black font-bold font-black font-black font-black">{view === 'inspections' ? 'Operations Overview' : view === 'inventory' ? 'MBTA Bridges' : 'Project Schedule'}</h1></div>
                                 {view === 'inspections' ? renderInspections() : view === 'inventory' ? renderInventory() : renderCalendar()}
                             </div>
                         </main>
