@@ -23,12 +23,8 @@
             0%, 100% { background-color: #ef4444; color: white; transform: scale(1); }
             50% { background-color: #7f1d1d; color: #fecaca; transform: scale(1.02); }
         }
-        .animate-flash-red {
-            animation: flash-red 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        .animate-shake {
-            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
-        }
+        .animate-flash-red { animation: flash-red 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        .animate-shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
         @keyframes shake {
             10%, 90% { transform: translate3d(-1px, 0, 0); }
             20%, 80% { transform: translate3d(2px, 0, 0); }
@@ -110,6 +106,7 @@
                 Check: <polyline points="20 6 9 17 4 12" />,
                 MessageSquare: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
                 Settings: <circle cx="12" cy="12" r="3" />,
+                TrendingUp: <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>,
                 LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></>
             };
             return (
@@ -122,7 +119,7 @@
         function StatCard({ title, value, iconName, color }) {
             return (
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-5 transition-transform hover:scale-[1.02]">
-                    <div className={`p-4 rounded-2xl ${color} shadow-lg`}>
+                    <div className={`p-4 rounded-2xl ${color} shadow-lg shadow-blue-100`}>
                         <Icon name={iconName} className="w-6 h-6 text-white" />
                     </div>
                     <div>
@@ -134,25 +131,30 @@
         }
 
         const getPaceStatus = (ins, today) => {
-            if (ins.isSubmitted) return { label: 'Complete', color: 'bg-indigo-600 text-white', icon: 'CheckCircle' };
+            if (ins.isSubmitted) return { label: 'Complete', color: 'bg-indigo-600 text-white', icon: 'CheckCircle', warning: false };
+            
             const checkMilestone = (date, isDone, label) => {
                 if (!date || isDone) return null;
                 const target = new Date(date + 'T00:00:00');
                 const diff = (today - target) / (1000 * 60 * 60 * 24);
-                if (diff > 7) return { label: `CRITICAL: ${label}`, color: 'animate-flash-red', icon: 'AlertTriangle' };
-                if (diff > 0) return { label: `BEHIND: ${label}`, color: 'bg-amber-500 text-white font-black', icon: 'Timer' };
+                
+                if (diff > 0) return { label: `OVERDUE: ${label}`, color: 'bg-rose-600 text-white animate-pulse', icon: 'AlertTriangle', warning: true };
+                if (diff > -5) return { label: `AT RISK: ${label}`, color: 'bg-amber-500 text-white', icon: 'Timer', warning: true };
                 return null;
             };
+
             const milestones = [
                 { date: ins.detailCheckDate, done: ins.isDetailChecked, name: 'Detail' },
                 { date: ins.reportQCDate, done: ins.isReportQCed, name: 'QC' },
-                { date: ins.dueDate, done: ins.isSubmitted, name: 'Submission' }
+                { date: ins.dueDate, done: ins.isSubmitted, name: 'Final Sub' }
             ];
+
             for (const m of milestones) {
                 const status = checkMilestone(m.date, m.done, m.name);
                 if (status) return status;
             }
-            return { label: 'On Pace', color: 'bg-emerald-600 text-white font-black', icon: 'CheckCircle' };
+            
+            return { label: 'On Pace', color: 'bg-emerald-600 text-white font-black', icon: 'CheckCircle', warning: false };
         };
 
         const BridgeModal = ({ isOpen, onClose, onSave, editingBridge }) => {
@@ -193,11 +195,12 @@
         const InspectionModal = ({ isOpen, onClose, onSave, bridges, editingInspection, preselectedBridgeId }) => {
             const [formData, setFormData] = useState({ 
                 inspectionName: '', bridgeId: '', inspectionDate: '', taskOrder: '', inspector: '', dueDate: '', priority: 'Medium', status: 'Field Work',
+                budgetedHours: '', actualHours: '',
                 detailCheckDate: '', isDetailChecked: false, detailChecker: '', reportQCDate: '', isReportQCed: false, qcReviewer: '', submissionDate: '', isSubmitted: false, qaReviewer: '', notes: ''
             });
             useEffect(() => {
                 if (editingInspection) setFormData({ ...formData, ...editingInspection });
-                else setFormData({ inspectionName: '', bridgeId: preselectedBridgeId || '', inspectionDate: '', taskOrder: '', inspector: '', dueDate: '', priority: 'Medium', status: 'Field Work', detailCheckDate: '', isDetailChecked: false, detailChecker: '', reportQCDate: '', isReportQCed: false, qcReviewer: '', submissionDate: '', isSubmitted: false, qaReviewer: '', notes: '' });
+                else setFormData({ inspectionName: '', bridgeId: preselectedBridgeId || '', inspectionDate: '', taskOrder: '', inspector: '', dueDate: '', priority: 'Medium', status: 'Field Work', budgetedHours: '', actualHours: '', detailCheckDate: '', isDetailChecked: false, detailChecker: '', reportQCDate: '', isReportQCed: false, qcReviewer: '', submissionDate: '', isSubmitted: false, qaReviewer: '', notes: '' });
             }, [editingInspection, preselectedBridgeId, isOpen]);
             
             if (!isOpen) return null;
@@ -211,7 +214,10 @@
                         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); onClose(); }} className="p-10 space-y-8 max-h-[85vh] overflow-y-auto custom-scrollbar">
                             <div className="grid grid-cols-3 gap-8">
                                 <div className="col-span-2 space-y-6">
-                                    <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Cycle Title</label><input required type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.inspectionName} onChange={e => setFormData({...formData, inspectionName: e.target.value})} /></div>
+                                    <div className="grid grid-cols-2 gap-6">
+                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Cycle Title</label><input required type="text" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.inspectionName} onChange={e => setFormData({...formData, inspectionName: e.target.value})} /></div>
+                                        <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Task Order (TO)</label><input type="text" placeholder="e.g. TO-05A" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.taskOrder} onChange={e => setFormData({...formData, taskOrder: e.target.value})} /></div>
+                                    </div>
                                     <div className="grid grid-cols-2 gap-6">
                                         <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Bridge BIN</label><select required className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.bridgeId} onChange={e => setFormData({...formData, bridgeId: e.target.value})}>
                                             <option value="">Select Asset</option>
@@ -225,6 +231,24 @@
                                     <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Submission Due</label><input type="date" className="w-full px-5 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold" value={formData.dueDate} onChange={e => setFormData({...formData, dueDate: e.target.value})} /></div>
                                 </div>
                             </div>
+
+                            <div className="grid grid-cols-2 gap-8">
+                                <div className="p-8 bg-blue-50/50 rounded-[2rem] border border-blue-100 space-y-4">
+                                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-600 flex items-center gap-2"><Icon name="Timer" className="w-4 h-4" /> Labor & Pacing Metrics</h3>
+                                    <div className="grid grid-cols-2 gap-6">
+                                        <div><label className="block text-[9px] font-black uppercase text-blue-400 mb-1">Budgeted Hrs</label><input type="number" step="0.1" className="w-full px-4 py-2 bg-white border border-blue-100 rounded-xl font-bold text-sm" value={formData.budgetedHours} onChange={e => setFormData({...formData, budgetedHours: e.target.value})} /></div>
+                                        <div><label className="block text-[9px] font-black uppercase text-blue-400 mb-1">Actual Hrs</label><input type="number" step="0.1" className="w-full px-4 py-2 bg-white border border-blue-100 rounded-xl font-bold text-sm" value={formData.actualHours} onChange={e => setFormData({...formData, actualHours: e.target.value})} /></div>
+                                    </div>
+                                </div>
+                                <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-200 flex flex-col justify-center text-center">
+                                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Labor Efficiency Indicator</p>
+                                    <div className="text-4xl font-black text-slate-900 mt-2">
+                                        {formData.budgetedHours && formData.actualHours ? `${Math.round((formData.actualHours / formData.budgetedHours) * 100)}%` : '--'}
+                                    </div>
+                                    <p className="text-[9px] font-medium text-slate-500 mt-1 uppercase italic">Total $Actual / Budget$ Utilization</p>
+                                </div>
+                            </div>
+
                             <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-200 space-y-6">
                                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-600 flex items-center gap-2"><Icon name="CheckCircle" className="w-4 h-4" /> Professional Sign-Off Checklist</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -280,39 +304,21 @@
             const today = new Date(todayStr + 'T00:00:00');
 
             useEffect(() => {
-                if (!auth) {
-                    setLoading(false);
-                    setError("Firebase Authentication is not available.");
-                    return;
-                }
-
+                if (!auth) { setLoading(false); return; }
                 const initAuth = async () => {
-                    try {
-                        if (initialToken) {
-                            await signInWithCustomToken(auth, initialToken);
-                        }
-                        // Manual login required for first-time users; removing anonymous auto-auth
-                    } catch (err) {
-                        console.error("Auth Failure:", err);
-                        setError("Secure connection dropped.");
-                        setLoading(false);
-                    }
+                    try { if (initialToken) await signInWithCustomToken(auth, initialToken); }
+                    catch (err) { setLoading(false); }
                 };
-                
                 initAuth();
-                const unsubscribe = onAuthStateChanged(auth, (u) => {
-                    setUser(u);
-                    if (!u) setLoading(false);
-                });
-                
+                const unsubscribe = onAuthStateChanged(auth, (u) => { setUser(u); if (!u) setLoading(false); });
                 return () => unsubscribe();
             }, []);
 
             useEffect(() => {
                 if (!user || !db) return;
                 setLoading(true);
-                const unsubBridges = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), (s) => setBridges(s.docs.map(d => d.data())), (e) => { setError("Sync failed."); setLoading(false); });
-                const unsubInspections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), (s) => { setInspections(s.docs.map(d => d.data())); setLoading(false); }, (e) => { setError("Sync failed."); setLoading(false); });
+                const unsubBridges = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), (s) => setBridges(s.docs.map(d => d.data())), (e) => setLoading(false));
+                const unsubInspections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), (s) => { setInspections(s.docs.map(d => d.data())); setLoading(false); }, (e) => setLoading(false));
                 return () => { unsubBridges(); unsubInspections(); };
             }, [user]);
 
@@ -320,18 +326,13 @@
                 e.preventDefault();
                 setError(null);
                 setLoading(true);
-                try {
-                    await signInWithEmailAndPassword(auth, email, password);
-                } catch (err) {
-                    setLoading(false);
-                    setError("Credential Mismatch. Corporate Access Restricted.");
-                }
+                try { await signInWithEmailAndPassword(auth, email, password); }
+                catch (err) { setLoading(false); setError("Credential Mismatch."); }
             };
 
             const handleSaveBridge = async (formData) => {
                 if (!db || !user) return;
-                const id = formData.id;
-                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', id), { ...formData, id });
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', formData.id), { ...formData });
                 setEditingBridge(null);
             };
 
@@ -344,9 +345,92 @@
 
             const filteredInspections = inspections.filter(ins => {
                 const bridge = bridges.find(b => b.id === ins.bridgeId);
-                const searchStr = `${ins.inspectionName} ${bridge?.name} ${ins.bridgeId} ${ins.inspector}`.toLowerCase();
+                const searchStr = `${ins.inspectionName} ${bridge?.name} ${ins.bridgeId} ${ins.inspector} ${ins.taskOrder}`.toLowerCase();
                 return searchStr.includes(searchTerm.toLowerCase());
             });
+
+            const taskOrderAnalytics = useMemo(() => {
+                const groups = {};
+                inspections.forEach(ins => {
+                    const pace = getPaceStatus(ins, today);
+                    const to = ins.taskOrder || 'Unassigned';
+                    if (!groups[to]) {
+                        groups[to] = { 
+                            name: to, total: 0, submitted: 0, budgeted: 0, actual: 0, 
+                            field: 0, detail: 0, qc: 0, warningCount: 0 
+                        };
+                    }
+                    groups[to].total++;
+                    if (ins.isSubmitted) groups[to].submitted++;
+                    if (ins.budgetedHours) groups[to].budgeted += parseFloat(ins.budgetedHours);
+                    if (ins.actualHours) groups[to].actual += parseFloat(ins.actualHours);
+                    if (pace.warning) groups[to].warningCount++;
+                    
+                    if (ins.isSubmitted) groups[to].qc++;
+                    else if (ins.isReportQCed) groups[to].qc++;
+                    else if (ins.isDetailChecked) groups[to].detail++;
+                    else groups[to].field++;
+                });
+                return Object.values(groups);
+            }, [inspections]);
+
+            const renderAnalytics = () => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                    {taskOrderAnalytics.length > 0 ? taskOrderAnalytics.map(to => {
+                        const progress = Math.round((to.submitted / to.total) * 100);
+                        const laborRatio = to.budgeted > 0 ? (to.actual / to.budgeted) : 0;
+                        const hasHighWarning = (to.warningCount / to.total) > 0.3;
+                        return (
+                            <div key={to.name} className={`bg-white rounded-[3rem] border shadow-xl overflow-hidden flex flex-col p-10 space-y-8 transition-all ${hasHighWarning ? 'border-rose-400 ring-4 ring-rose-500/10 shadow-rose-200' : 'border-slate-200'}`}>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="text-3xl font-black tracking-tighter uppercase text-slate-900">{to.name}</h3>
+                                        <p className="text-[10px] font-black uppercase text-slate-400 mt-1 tracking-widest">{to.total} Active bridge Workflows</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                        <div className={`px-6 py-2 rounded-2xl text-[10px] font-black uppercase border tracking-widest ${laborRatio > 1 ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
+                                            Variance: {Math.round(laborRatio * 100)}%
+                                        </div>
+                                        {to.warningCount > 0 && (
+                                            <div className="flex items-center gap-1.5 px-3 py-1 bg-rose-600 text-white rounded-lg animate-pulse">
+                                                <Icon name="AlertTriangle" className="w-3 h-3" />
+                                                <span className="text-[8px] font-black uppercase">{to.warningCount} Delayed Assets</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-end">
+                                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest leading-none">Schedule compliance</span>
+                                        <span className={`text-2xl font-black leading-none ${progress < 50 && to.total > 0 ? 'text-rose-600' : 'text-blue-600'}`}>{progress}%</span>
+                                    </div>
+                                    <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden flex">
+                                        <div className={`h-full transition-all duration-1000 ${progress < 50 ? 'bg-rose-500' : 'bg-blue-600'}`} style={{ width: `${progress}%` }} />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-50">
+                                    <div className="text-center p-4 bg-slate-50 rounded-3xl">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Office Hours</p>
+                                        <p className="text-lg font-black text-slate-900">{to.actual.toFixed(1)} <span className="text-[10px] opacity-40">/ {to.budgeted.toFixed(1)}</span></p>
+                                    </div>
+                                    <div className="text-center p-4 bg-emerald-50/50 rounded-3xl">
+                                        <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Remaining</p>
+                                        <p className="text-lg font-black text-emerald-900">{to.total - to.submitted}</p>
+                                    </div>
+                                    <div className="text-center p-4 bg-indigo-50/50 rounded-3xl">
+                                        <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Submitted</p>
+                                        <p className="text-lg font-black text-indigo-900">{to.submitted}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    }) : (
+                        <div className="col-span-2 py-20 text-center text-slate-400 font-black uppercase tracking-widest text-xs">No Task Order data available for analytics</div>
+                    )}
+                </div>
+            );
 
             const renderCalendar = () => {
                 const year = currentCalendarDate.getFullYear();
@@ -413,7 +497,7 @@
                     <div className="h-screen w-full flex items-center justify-center bg-slate-900 p-6">
                         <div className="w-full max-w-md bg-white rounded-[3rem] p-12 shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-500">
                             <div className="flex flex-col items-center gap-6 mb-10 text-center">
-                                <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-600/30">
+                                <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-600/30 font-black">
                                     <BridgeIcon className="w-12 h-12 text-white" />
                                 </div>
                                 <div>
@@ -422,18 +506,10 @@
                                 </div>
                             </div>
                             <form onSubmit={handleLogin} className="space-y-6">
-                                <div>
-                                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Secure Email</label>
-                                    <input required type="email" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all" value={email} onChange={e => setEmail(e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Access Key</label>
-                                    <input required type="password" placeholder="••••••••" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all" value={password} onChange={e => setPassword(e.target.value)} />
-                                </div>
-                                {error && <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold animate-shake leading-relaxed">{error}</div>}
-                                <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-[0.3em] shadow-2xl hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-4">
-                                    <Icon name="LogIn" className="w-6 h-6" /> Authenticate
-                                </button>
+                                <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Email</label><input required type="email" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={email} onChange={e => setEmail(e.target.value)} /></div>
+                                <div><label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Key</label><input required type="password" placeholder="••••••••" className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold" value={password} onChange={e => setPassword(e.target.value)} /></div>
+                                {error && <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold animate-shake">{error}</div>}
+                                <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-[2rem] font-black text-sm uppercase tracking-[0.3em] shadow-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-4"><Icon name="LogIn" /> Authenticate</button>
                             </form>
                         </div>
                     </div>
@@ -449,17 +525,18 @@
                             </div>
                             <div>
                                 <h1 className="text-3xl font-black tracking-tighter uppercase leading-none text-white">BridgeFlow</h1>
-                                <p className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-[0.4em]">Operational Portal</p>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase mt-2 tracking-[0.4em]">Operations</p>
                             </div>
                         </div>
                         <div className="p-8 space-y-4 flex-grow">
                             <button onClick={() => setView('inspections')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inspections' ? 'bg-blue-600 text-white shadow-2xl' : 'text-slate-500 hover:bg-slate-800'}`}><Icon name="LayoutDashboard" /> Workflows</button>
+                            <button onClick={() => setView('analytics')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'analytics' ? 'bg-blue-600 text-white shadow-2xl' : 'text-slate-500 hover:bg-slate-800'}`}><Icon name="TrendingUp" /> Contract Analytics</button>
                             <button onClick={() => setView('inventory')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'inventory' ? 'bg-blue-600 text-white shadow-2xl' : 'text-slate-500 hover:bg-slate-800'}`}><Icon name="Settings" /> Bridge Inventory</button>
                             <button onClick={() => setView('calendar')} className={`w-full flex items-center gap-5 px-8 py-5 rounded-[2rem] font-black text-xs transition-all ${view === 'calendar' ? 'bg-blue-600 text-white shadow-2xl' : 'text-slate-500 hover:bg-slate-800'}`}><Icon name="Calendar" /> Schedule</button>
                         </div>
                         <div className="p-8 border-t border-slate-800/50 flex flex-col items-center text-center">
-                            <span className="text-[10px] font-black uppercase text-blue-500 tracking-[0.3em]">Authorized Session Active</span>
-                            <button onClick={() => signOut(auth)} className="mt-4 text-[9px] font-black uppercase text-slate-500 hover:text-rose-500 transition-colors">Terminate Session</button>
+                            <span className="text-[10px] font-black uppercase text-blue-500 tracking-[0.3em]">Authorized Access</span>
+                            <button onClick={() => signOut(auth)} className="mt-4 text-[9px] font-black uppercase text-slate-500 hover:text-rose-500 transition-colors">Sign Out</button>
                         </div>
                     </nav>
 
@@ -467,7 +544,7 @@
                         <header className="h-28 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-12 flex items-center justify-between shrink-0 z-40">
                             <div className="relative w-[600px]">
                                 <Icon name="Search" className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                <input type="text" placeholder="Search operational data..." className="w-full pl-16 pr-8 py-5 bg-slate-50 rounded-[1.25rem] outline-none focus:ring-8 focus:ring-blue-500/5 border-2 border-transparent focus:border-blue-500 transition-all font-bold text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Search workflow data..." className="w-full pl-16 pr-8 py-5 bg-slate-50 rounded-[1.25rem] outline-none focus:ring-8 focus:ring-blue-500/5 border-2 border-transparent focus:border-blue-500 transition-all font-bold text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                             </div>
                             <button onClick={() => { setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-8 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-700 transition-all flex items-center gap-3"><Icon name="Plus" /> Log New Inspection</button>
                         </header>
@@ -478,25 +555,36 @@
                                     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                             <StatCard title="Active Cycle Tasks" value={inspections.length} iconName="FileText" color="bg-blue-600" />
-                                            <StatCard title="Critical Delayed" value={inspections.filter(i => getPaceStatus(i, today).label.includes('CRITICAL')).length} iconName="AlertTriangle" color="bg-rose-600" />
+                                            <StatCard title="Total Critical Warnings" value={inspections.filter(i => getPaceStatus(i, today).warning).length} iconName="AlertTriangle" color="bg-rose-600" />
                                         </div>
 
                                         <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
-                                            <div className="p-10 border-b border-slate-100 bg-slate-50/50">
-                                                <h2 className="text-2xl font-black uppercase tracking-tighter">Live Inspection Tracking</h2>
+                                            <div className="p-10 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                                                <h2 className="text-2xl font-black uppercase tracking-tighter">Workflow schedule tracking</h2>
                                             </div>
                                             <table className="w-full text-left">
                                                 <thead className="bg-slate-50/30 text-slate-400 font-black text-[10px] uppercase tracking-widest border-b border-slate-100">
-                                                    <tr><th className="px-10 py-6">Asset / Cycle</th><th className="px-10 py-6">Pacing</th><th className="px-10 py-6 text-center">QC Progress</th><th className="px-10 py-6 text-right">Submission Target</th></tr>
+                                                    <tr>
+                                                        <th className="px-10 py-6 w-10 text-center">Alert</th>
+                                                        <th className="px-10 py-6">Asset / Cycle</th>
+                                                        <th className="px-10 py-6">Pacing</th>
+                                                        <th className="px-10 py-6">Labor utilization</th>
+                                                        <th className="px-10 py-6 text-right">Target Due</th>
+                                                    </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
-                                                    {filteredInspections.length > 0 ? filteredInspections.map(ins => {
+                                                    {filteredInspections.map(ins => {
                                                         const pace = getPaceStatus(ins, today);
+                                                        const laborRatio = ins.budgetedHours && ins.actualHours ? (ins.actualHours / ins.budgetedHours) : 0;
+                                                        const isPastDue = new Date(ins.dueDate) < today && !ins.isSubmitted;
                                                         return (
-                                                            <tr key={ins.id} className="hover:bg-blue-50/20 cursor-pointer group" onClick={() => { setEditingInspection(ins); setIsInspectionModalOpen(true); }}>
+                                                            <tr key={ins.id} className={`hover:bg-blue-50/20 cursor-pointer group transition-colors ${pace.warning ? 'bg-rose-50/20' : ''}`} onClick={() => { setEditingInspection(ins); setIsInspectionModalOpen(true); }}>
+                                                                <td className="px-10 py-8 text-center">
+                                                                    {pace.warning && <Icon name="AlertTriangle" className="w-6 h-6 text-rose-600 animate-flash-red mx-auto p-1 rounded-md" />}
+                                                                </td>
                                                                 <td className="px-10 py-8">
-                                                                    <div className="text-4xl font-black text-blue-600 font-mono tracking-tighter">{ins.bridgeId}</div>
-                                                                    <div className="text-xs font-black text-slate-500 uppercase">{ins.inspectionName}</div>
+                                                                    <div className="text-4xl font-black text-blue-600 font-mono tracking-tighter leading-none">{ins.bridgeId}</div>
+                                                                    <div className="text-[10px] font-black text-slate-400 uppercase mt-1">TO: {ins.taskOrder || 'Unassigned'}</div>
                                                                 </td>
                                                                 <td className="px-10 py-8">
                                                                     <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase flex items-center gap-2 w-fit ${pace.color}`}>
@@ -504,23 +592,28 @@
                                                                     </div>
                                                                 </td>
                                                                 <td className="px-10 py-8">
-                                                                    <div className="flex justify-center gap-3">
-                                                                        <div className={`w-5 h-5 rounded-lg border-2 ${ins.isDetailChecked ? 'bg-emerald-500 border-emerald-600' : 'bg-slate-100 border-slate-200'}`} />
-                                                                        <div className={`w-5 h-5 rounded-lg border-2 ${ins.isReportQCed ? 'bg-blue-500 border-blue-600' : 'bg-slate-100 border-slate-200'}`} />
-                                                                        <div className={`w-5 h-5 rounded-lg border-2 ${ins.isSubmitted ? 'bg-indigo-500 border-indigo-600' : 'bg-slate-100 border-slate-200'}`} />
+                                                                    <div className="flex flex-col gap-1.5">
+                                                                        <div className="flex justify-between text-[9px] font-black uppercase text-slate-400">
+                                                                            <span>{ins.actualHours || '0'} / {ins.budgetedHours || '0'} Hrs</span>
+                                                                        </div>
+                                                                        <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                                            <div className={`h-full transition-all duration-500 ${laborRatio > 1 ? 'bg-rose-500' : 'bg-blue-500'}`} style={{ width: `${Math.min(laborRatio * 100, 100)}%` }} />
+                                                                        </div>
                                                                     </div>
                                                                 </td>
-                                                                <td className="px-10 py-8 text-right font-mono text-sm text-slate-400">{ins.dueDate}</td>
+                                                                <td className={`px-10 py-8 text-right font-mono text-sm font-black ${isPastDue ? 'text-rose-600' : 'text-slate-400'}`}>
+                                                                    {ins.dueDate}
+                                                                </td>
                                                             </tr>
                                                         );
-                                                    }) : (
-                                                        <tr><td colSpan="4" className="px-10 py-20 text-center text-slate-400 font-black uppercase tracking-widest text-xs">No active workflows found</td></tr>
-                                                    )}
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>
                                     </div>
                                 )}
+
+                                {view === 'analytics' && renderAnalytics()}
 
                                 {view === 'inventory' && (
                                     <div className="bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden animate-in fade-in">
@@ -533,7 +626,7 @@
                                                 <tr><th className="px-10 py-6">BIN / ID</th><th className="px-10 py-6">Name / Route</th><th className="px-10 py-6 text-right">Actions</th></tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
-                                                {bridges.length > 0 ? bridges.map(b => (
+                                                {bridges.map(b => (
                                                     <tr key={b.id} className="hover:bg-slate-50 transition-colors">
                                                         <td className="px-10 py-8 font-mono text-3xl font-black text-blue-600 tracking-tighter">{b.id}</td>
                                                         <td className="px-10 py-8">
@@ -543,12 +636,10 @@
                                                         <td className="px-10 py-8 text-right space-x-4">
                                                             <button onClick={() => { setPreselectedBridgeId(b.id); setEditingInspection(null); setIsInspectionModalOpen(true); }} className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg">New Cycle</button>
                                                             <button onClick={() => { setEditingBridge(b); setIsBridgeModalOpen(true); }} className="p-3 text-slate-300 hover:text-blue-600 transition-all"><Icon name="Edit" /></button>
-                                                            <button onClick={() => { if(confirm('Permanently Delete Master Record?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', b.id)); }} className="p-3 text-slate-300 hover:text-rose-600 transition-all"><Icon name="Trash2" /></button>
+                                                            <button onClick={() => { if(confirm('Permanently Delete?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', b.id)); }} className="p-3 text-slate-300 hover:text-rose-600 transition-all"><Icon name="Trash2" /></button>
                                                         </td>
                                                     </tr>
-                                                )) : (
-                                                    <tr><td colSpan="3" className="px-10 py-20 text-center text-slate-400 font-black uppercase tracking-widest text-xs">No assets registered in inventory</td></tr>
-                                                )}
+                                                ))}
                                             </tbody>
                                         </table>
                                     </div>
