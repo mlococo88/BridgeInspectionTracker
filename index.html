@@ -45,7 +45,7 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Your specific Firebase Configuration for the inspection tracker project
+        // Hardcoded fallback configuration for use outside of the Canvas environment
         const providedConfig = {
             apiKey: "AIzaSyCRHPdaDm9r3do9gAPohfOe_M0A4ELma_I",
             authDomain: "inspection-tracker-e5723.firebaseapp.com",
@@ -58,22 +58,27 @@
 
         let firebaseConfig = providedConfig;
 
-        // Environment variable check for Canvas environment compatibility
+        // Attempt to parse dynamic environment variables injected by the platform
         try {
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = JSON.parse(__firebase_config);
             }
         } catch (e) {
-            console.warn("Using provided fallback Firebase configuration.");
+            console.warn("BridgeFlow: Using provided manual Firebase configuration.");
         }
 
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'bridge-hq-v4';
         const initialToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // Initialize Firebase services
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        // Initialize Firebase services with error handling
+        let app, auth, db;
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (err) {
+            console.error("BridgeFlow: Failed to initialize Firebase. Verify your configuration.");
+        }
 
         window.FB = { db, auth, appId, initialToken, doc, setDoc, deleteDoc, collection, onSnapshot, query, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut };
     </script>
@@ -268,6 +273,7 @@
             const [editingInspection, setEditingInspection] = useState(null);
             const [preselectedBridgeId, setPreselectedBridgeId] = useState('');
             const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date('2026-02-01'));
+            const [error, setError] = useState(null);
 
             const { db, auth, appId, initialToken, doc, setDoc, deleteDoc, collection, onSnapshot, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.FB;
             const todayStr = '2026-02-04';
@@ -276,35 +282,76 @@
             useEffect(() => {
                 if (!auth) {
                     setLoading(false);
+                    setError("Firebase Authentication is not available.");
                     return;
                 }
 
                 const initAuth = async () => {
-                    if (initialToken) await signInWithCustomToken(auth, initialToken);
-                    else await signInAnonymously(auth);
+                    try {
+                        if (initialToken) {
+                            await signInWithCustomToken(auth, initialToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (err) {
+                        console.error("Auth Failure:", err);
+                        setError("Authentication failed. Ensure your domain is authorized in Firebase.");
+                        setLoading(false);
+                    }
                 };
+                
                 initAuth();
-                const unsubscribe = onAuthStateChanged(auth, setUser);
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    // If we have a user but no data fetch has started yet, we stay in loading.
+                    // If no user is found, we stop loading to show the "Offline" or Error state.
+                    if (!u) setLoading(false);
+                });
+                
                 return () => unsubscribe();
             }, []);
 
             useEffect(() => {
                 if (!user || !db) return;
+                
+                // Set loading back to true when data fetch starts
                 setLoading(true);
-                const unsubBridges = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), (s) => setBridges(s.docs.map(d => d.data())), (e) => console.error(e));
-                const unsubInspections = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), (s) => { setInspections(s.docs.map(d => d.data())); setLoading(false); }, (e) => console.error(e));
+                
+                const unsubBridges = onSnapshot(
+                    collection(db, 'artifacts', appId, 'public', 'data', 'bridges'), 
+                    (s) => setBridges(s.docs.map(d => d.data())), 
+                    (e) => {
+                        console.error("Bridge Sync Error:", e);
+                        setError("Permission denied. Database sync failed.");
+                        setLoading(false);
+                    }
+                );
+                
+                const unsubInspections = onSnapshot(
+                    collection(db, 'artifacts', appId, 'public', 'data', 'inspections'), 
+                    (s) => { 
+                        setInspections(s.docs.map(d => d.data())); 
+                        setLoading(false); 
+                    }, 
+                    (e) => {
+                        console.error("Inspection Sync Error:", e);
+                        setError("Permission denied. Database sync failed.");
+                        setLoading(false);
+                    }
+                );
+                
                 return () => { unsubBridges(); unsubInspections(); };
             }, [user]);
 
             const handleSaveBridge = async (formData) => {
-                if (!db) return;
+                if (!db || !user) return;
                 const id = formData.id;
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bridges', id), { ...formData, id });
                 setEditingBridge(null);
             };
 
             const handleSaveInspection = async (formData) => {
-                if (!db) return;
+                if (!db || !user) return;
                 const id = formData.id || `INS-${Date.now()}`;
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'inspections', id), { ...formData, id });
                 setEditingInspection(null);
@@ -367,9 +414,14 @@
                 );
             };
 
-            if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-900 text-white font-black uppercase tracking-widest animate-pulse">Synchronizing Operations...</div>;
-
-            const isOffline = !window.FB.db;
+            if (loading) {
+                return (
+                    <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900 text-white">
+                        <div className="text-4xl font-black uppercase tracking-widest animate-pulse">Synchronizing Operations...</div>
+                        <div className="mt-4 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Bridging Data to Secure Nodes</div>
+                    </div>
+                );
+            }
 
             return (
                 <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -390,7 +442,13 @@
                         </div>
                         <div className="p-8 border-t border-slate-800/50 flex flex-col items-center text-center">
                             <span className="text-[10px] font-black uppercase text-blue-500 tracking-[0.3em]">Authorized Access</span>
-                            {isOffline && <div className="mt-4 p-2 bg-rose-500/10 text-rose-500 text-[8px] font-bold uppercase rounded-lg border border-rose-500/20">Offline Mode: Config Missing</div>}
+                            {error ? (
+                                <div className="mt-4 p-3 bg-rose-500/20 text-rose-500 text-[9px] font-black uppercase rounded-xl border border-rose-500/30 animate-shake">
+                                    {error}
+                                </div>
+                            ) : (
+                                <div className="mt-4 p-2 bg-emerald-500/10 text-emerald-500 text-[8px] font-bold uppercase rounded-lg border border-emerald-500/20">Secure Node Connected</div>
+                            )}
                         </div>
                     </nav>
 
